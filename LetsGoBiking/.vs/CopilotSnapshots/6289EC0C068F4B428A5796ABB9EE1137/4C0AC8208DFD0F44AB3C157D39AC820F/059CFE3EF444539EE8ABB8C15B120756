@@ -1,0 +1,29 @@
+﻿using System;
+using System.ServiceModel;
+using System.ServiceModel.Description;
+using System.ServiceModel.Web;
+
+namespace RoutingServer
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            Uri baseAddress = new Uri("http://localhost:8081/");
+
+            using (WebServiceHost host = new WebServiceHost(typeof(RoutingService), baseAddress))
+            {
+                var endpoint = host.AddServiceEndpoint(typeof(IRoutingService), new WebHttpBinding(), "");
+                endpoint.EndpointBehaviors.Add(new WebHttpBehavior());
+
+                host.Open();
+                Console.WriteLine("╔═══════════════════════════════════╗");
+                Console.WriteLine("║ 🚀 ROUTING SERVER REST RUNNING     ║");
+                Console.WriteLine("╚═══════════════════════════════════╝");
+                Console.WriteLine($"🌐 URL : {baseAddress}");
+                Console.WriteLine("Press ENTER to stop...");
+                Console.ReadLine();
+            }
+        }
+    }
+}

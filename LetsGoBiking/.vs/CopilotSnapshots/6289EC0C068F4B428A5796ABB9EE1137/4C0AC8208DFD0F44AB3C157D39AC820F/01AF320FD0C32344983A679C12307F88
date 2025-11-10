@@ -1,0 +1,48 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.Serialization;
+using System.ServiceModel;
+using System.Text;
+using System.Runtime.Caching;
+using System.Net.Http;
+
+namespace ProxyServer
+{
+    // NOTE: You can use the "Rename" command on the "Refactor" menu to change the class name "Service1" in both code and config file together.
+    public class ProxyService : IProxyService
+    {
+        private static readonly MemoryCache cache = MemoryCache.Default;
+
+        public string Get(string url)
+        {
+            try
+            {
+                // 🔹 Étape 1 : vérifier si la donnée est déjà dans le cache
+                if (cache.Contains(url))
+                {
+                    Console.WriteLine($"✅ CACHE HIT → {url}");
+                    return (string)cache[url];
+                }
+
+                Console.WriteLine($"🌍 CACHE MISS → requête vers API : {url}");
+
+                // 🔹 Étape 2 : appeler l’API externe
+                using (HttpClient client = new HttpClient())
+                {
+                    var response = client.GetStringAsync(url).Result;
+
+                    // 🔹 Étape 3 : mettre en cache pour 2 minutes
+                    cache.Add(url, response, DateTimeOffset.Now.AddMinutes(2));
+
+                    return response;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Erreur dans ProxyService : {ex.Message}");
+                return $"{{\"error\":\"{ex.Message}\"}}";
+            }
+        }
+    }
+}
