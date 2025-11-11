@@ -1,0 +1,23 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.Serialization;
+using System.ServiceModel;
+using System.Text;
+
+namespace ProxyServer
+{
+
+    // 🚀 Déclare un contrat de service SOAP
+    [ServiceContract]
+    public interface IProxyService
+    {
+        // Méthode principale : exécuter une requête GET vers une API externe
+        [OperationContract]
+        string Get(string url);
+
+        // Méthode dédiée pour OpenRouteService : calcul de durée d'itinéraire
+        [OperationContract]
+        double GetRouteDuration(double startLat, double startLon, double endLat, double endLon, string mode);
+    }
+}

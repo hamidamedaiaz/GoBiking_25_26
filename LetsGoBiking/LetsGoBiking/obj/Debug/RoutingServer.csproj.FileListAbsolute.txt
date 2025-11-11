@@ -14,3 +14,6 @@ C:\Users\user\Desktop\LetsGoBiking_25_26\GoBiking_25_26\LetsGoBiking\LetsGoBikin
 C:\Users\user\Desktop\LetsGoBiking_25_26\GoBiking_25_26\LetsGoBiking\LetsGoBiking\obj\Debug\XsdGeneratedCode\GeneratedXsdTypes.cs
 C:\Users\user\Desktop\LetsGoBiking_25_26\GoBiking_25_26\LetsGoBiking\LetsGoBiking\obj\Debug\LetsGoBiking.dll
 C:\Users\user\Desktop\LetsGoBiking_25_26\GoBiking_25_26\LetsGoBiking\LetsGoBiking\obj\Debug\LetsGoBiking.pdb
+C:\Users\user\Desktop\LetsGoBiking_25_26\GoBiking_25_26\LetsGoBiking\LetsGoBiking\bin\Debug\Newtonsoft.Json.dll
+C:\Users\user\Desktop\LetsGoBiking_25_26\GoBiking_25_26\LetsGoBiking\LetsGoBiking\bin\Debug\Newtonsoft.Json.xml
+C:\Users\user\Desktop\LetsGoBiking_25_26\GoBiking_25_26\LetsGoBiking\LetsGoBiking\obj\Debug\RoutingS.054A1291.Up2Date

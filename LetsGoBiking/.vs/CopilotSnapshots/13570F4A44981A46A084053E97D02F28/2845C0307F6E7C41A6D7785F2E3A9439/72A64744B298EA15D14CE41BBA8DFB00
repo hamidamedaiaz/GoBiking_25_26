@@ -1,0 +1,134 @@
+﻿using LetsGoBiking.ServiceReference1;
+using Newtonsoft.Json; // N’oublie pas d’ajouter le package NuGet
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.ServiceModel.Web;  // ✅ Ajouter cette ligne
+using System.Text;
+
+
+namespace RoutingService
+{
+    public class RoutingService : IRoutingService
+    {
+        public Stream GetItinerary(string o, string d)
+        {
+            try
+            {
+                ProxyServiceClient proxy = new ProxyServiceClient("BasicHttpBinding_IProxyService");
+
+                Console.WriteLine($"🧭 Itinéraire demandé : {o} → {d}");
+
+                // 1️⃣ Géocodage
+                var originCoords = GeocodeAddress(proxy, o);
+                var destCoords = GeocodeAddress(proxy, d);
+
+                // 2️⃣ Récupérer les stations
+                string stationsJson = proxy.Get("https://api.jcdecaux.com/vls/v1/stations?contract=Nice&apiKey=4ffffd09ca3de7e586d3f46bebbd9a8a7f98191f");
+                var stations = JsonConvert.DeserializeObject<List<Station>>(stationsJson);
+
+                // 3️⃣ Trouver les stations optimales
+                var startStation = FindNearestStationWithBikes(originCoords, stations);
+                var endStation = FindNearestStationWithStands(destCoords, stations);
+
+                // 4️⃣ Calculer les durées (via Proxy → OpenRouteService)
+                double walkToStation = GetRouteDuration(proxy, originCoords.Lat, originCoords.Lon, startStation.Position.Lat, startStation.Position.Lng, "foot-walking");
+                double bikeDuration = GetRouteDuration(proxy, startStation.Position.Lat, startStation.Position.Lng, endStation.Position.Lat, endStation.Position.Lng, "cycling-regular");
+                double walkToDest = GetRouteDuration(proxy, endStation.Position.Lat, endStation.Position.Lng, destCoords.Lat, destCoords.Lon, "foot-walking");
+                double directWalk = GetRouteDuration(proxy, originCoords.Lat, originCoords.Lon, destCoords.Lat, destCoords.Lon, "foot-walking");
+
+                double totalBike = walkToStation + bikeDuration + walkToDest;
+
+                // 5️⃣ Comparer
+                string result;
+                if (totalBike < directWalk)
+                {
+                    result = $"Le vélo est plus rapide 🚴 ({Math.Round(totalBike / 60)} min contre {Math.Round(directWalk / 60)} min)";
+                }
+                else
+                {
+                    result = $"La marche directe est plus rapide 🚶 ({Math.Round(directWalk / 60)} min contre {Math.Round(totalBike / 60)} min)";
+                }
+
+                // 6️⃣ Retourner résultat
+                WebOperationContext.Current.OutgoingResponse.Headers.Add("Access-Control-Allow-Origin", "*");
+                WebOperationContext.Current.OutgoingResponse.ContentType = "application/json";
+                byte[] jsonBytes = Encoding.UTF8.GetBytes($"{{\"result\":\"{result}\"}}");
+                return new MemoryStream(jsonBytes);
+            }
+            catch (Exception ex)
+            {
+                string error = $"{{\"error\":\"{ex.Message}\"}}";
+                byte[] errorBytes = Encoding.UTF8.GetBytes(error);
+                WebOperationContext.Current.OutgoingResponse.ContentType = "application/json";
+                return new MemoryStream(errorBytes);
+            }
+        }
+
+        private (double Lat, double Lon) GeocodeAddress(ProxyServiceClient proxy, string address)
+        {
+            try
+            {
+                // On utilise l’API française gratuite (data.gouv.fr)
+                string url = $"https://api-adresse.data.gouv.fr/search/?q={Uri.EscapeDataString(address)}&limit=1";
+
+                string json = proxy.Get(url);
+                dynamic result = JsonConvert.DeserializeObject(json);
+
+                double lon = result.features[0].geometry.coordinates[0];
+                double lat = result.features[0].geometry.coordinates[1];
+
+                return (lat, lon);
+            }
+            catch
+            {
+                throw new Exception($"Impossible de géocoder l’adresse : {address}");
+            }
+        
+
+// Calcul de distance entre deux points GPS
+private double CalculateDistance(double lat1, double lon1, double lat2, double lon2)
+    {
+        var coord1 = new GeoCoordinate(lat1, lon1);
+        var coord2 = new GeoCoordinate(lat2, lon2);
+        return coord1.GetDistanceTo(coord2); // en mètres
+    }
+
+    // Trouver la station la plus proche avec des vélos disponibles
+    private Station FindNearestStationWithBikes((double Lat, double Lon) origin, List<Station> stations)
+    {
+        return stations
+            .Where(s => s.AvailableBikes > 0)
+            .OrderBy(s => CalculateDistance(origin.Lat, origin.Lon, s.Position.Lat, s.Position.Lng))
+            .FirstOrDefault();
+    }
+
+    // Trouver la station la plus proche avec des places disponibles
+    private Station FindNearestStationWithStands((double Lat, double Lon) dest, List<Station> stations)
+    {
+        return stations
+            .Where(s => s.AvailableBikeStands > 0)
+            .OrderBy(s => CalculateDistance(dest.Lat, dest.Lon, s.Position.Lat, s.Position.Lng))
+            .FirstOrDefault();
+    }
+        private double GetRouteDuration(ProxyServiceClient proxy, double startLat, double startLon, double endLat, double endLon, string mode)
+        {
+            try
+            {
+                string url = $"https://api.openrouteservice.org/v2/directions/{mode}?api_key=YOUR_ORS_KEY&start={startLon},{startLat}&end={endLon},{endLat}";
+                string json = proxy.Get(url);
+
+                dynamic result = JsonConvert.DeserializeObject(json);
+                double duration = result.features[0].properties.segments[0].duration;
+                return duration; // en secondes
+            }
+            catch
+            {
+                return double.PositiveInfinity; // si erreur
+            }
+        }
+
+
+    }
+
+

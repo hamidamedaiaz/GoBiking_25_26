@@ -1,0 +1,172 @@
+﻿using LetsGoBiking.ServiceReference1;
+using Newtonsoft.Json;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.ServiceModel.Web;
+using System.Text;
+using System.Device.Location;
+
+namespace RoutingService
+{
+    public class RoutingService : IRoutingService
+    {
+        private const string ORS_API_KEY = "5b3ce3597851110001cf6248c87afe9e1e7f4e0bbfb873fc06a9b3c3"; // Remplacez par votre clé
+
+        public Stream GetItinerary(string o, string d)
+        {
+            try
+            {
+                ProxyServiceClient proxy = new ProxyServiceClient("BasicHttpBinding_IProxyService");
+
+                Console.WriteLine($"🧭 Itinéraire demandé : {o} → {d}");
+
+                // 1️⃣ Géocodage des adresses
+                var originCoords = GeocodeAddress(o);
+                var destCoords = GeocodeAddress(d);
+
+                Console.WriteLine($"📍 Origine : {originCoords.Lat}, {originCoords.Lon}");
+                Console.WriteLine($"📍 Destination : {destCoords.Lat}, {destCoords.Lon}");
+
+                // 2️⃣ Récupérer les stations via le Proxy (JCDecaux)
+                string stationsJson = proxy.Get("https://api.jcdecaux.com/vls/v1/stations?contract=Lyon&apiKey=4ffffd09ca3de7e586d3f46bebbd9a8a7f98191f");
+                var stations = JsonConvert.DeserializeObject<List<Station>>(stationsJson);
+
+                // 3️⃣ Trouver les stations optimales
+                var startStation = FindNearestStationWithBikes(originCoords, stations);
+                var endStation = FindNearestStationWithStands(destCoords, stations);
+
+                if (startStation == null || endStation == null)
+                {
+                    throw new Exception("Aucune station disponible avec des vélos ou des places libres");
+                }
+
+                Console.WriteLine($"🚲 Station départ : {startStation.Name}");
+                Console.WriteLine($"🅿️ Station arrivée : {endStation.Name}");
+
+                // 4️⃣ Calculer les durées via OpenRouteService directement
+                double walkToStation = GetRouteDuration(originCoords.Lat, originCoords.Lon, startStation.Position.Lat, startStation.Position.Lng, "foot-walking");
+                double bikeDuration = GetRouteDuration(startStation.Position.Lat, startStation.Position.Lng, endStation.Position.Lat, endStation.Position.Lng, "cycling-regular");
+                double walkToDest = GetRouteDuration(endStation.Position.Lat, endStation.Position.Lng, destCoords.Lat, destCoords.Lon, "foot-walking");
+                double directWalk = GetRouteDuration(originCoords.Lat, originCoords.Lon, destCoords.Lat, destCoords.Lon, "foot-walking");
+
+                double totalBike = walkToStation + bikeDuration + walkToDest;
+
+                Console.WriteLine($"⏱️ Marche directe : {Math.Round(directWalk / 60)} min");
+                Console.WriteLine($"⏱️ Avec vélo : {Math.Round(totalBike / 60)} min");
+
+                // 5️⃣ Créer l'itinéraire
+                var itinerary = new Itinerary
+                {
+                    UseBike = totalBike < directWalk,
+                    DepartureStation = startStation,
+                    ArrivalStation = endStation,
+                    TotalDuration = Math.Min(totalBike, directWalk),
+                    Steps = new List<Step>()
+                };
+
+                if (itinerary.UseBike)
+                {
+                    itinerary.Steps.Add(new Step { Instruction = $"🚶 Marcher jusqu'à la station {startStation.Name}", Duration = walkToStation, Mode = "walk" });
+                    itinerary.Steps.Add(new Step { Instruction = $"🚴 Prendre un vélo jusqu'à la station {endStation.Name}", Duration = bikeDuration, Mode = "bike" });
+                    itinerary.Steps.Add(new Step { Instruction = $"🚶 Marcher jusqu'à la destination", Duration = walkToDest, Mode = "walk" });
+                }
+                else
+                {
+                    itinerary.Steps.Add(new Step { Instruction = $"🚶 Marcher directement jusqu'à la destination", Duration = directWalk, Mode = "walk" });
+                }
+
+                // 6️⃣ Retourner le résultat en JSON
+                string jsonResult = JsonConvert.SerializeObject(itinerary);
+                WebOperationContext.Current.OutgoingResponse.Headers.Add("Access-Control-Allow-Origin", "*");
+                WebOperationContext.Current.OutgoingResponse.ContentType = "application/json";
+                byte[] jsonBytes = Encoding.UTF8.GetBytes(jsonResult);
+                return new MemoryStream(jsonBytes);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Erreur : {ex.Message}");
+                string error = $"{{\"error\":\"{ex.Message}\"}}";
+                byte[] errorBytes = Encoding.UTF8.GetBytes(error);
+                WebOperationContext.Current.OutgoingResponse.ContentType = "application/json";
+                return new MemoryStream(errorBytes);
+            }
+        }
+
+        // Géocodage via API française gratuite
+        private (double Lat, double Lon) GeocodeAddress(string address)
+        {
+            try
+            {
+                using (HttpClient client = new HttpClient())
+                {
+                    string url = $"https://api-adresse.data.gouv.fr/search/?q={Uri.EscapeDataString(address)}&limit=1";
+                    string json = client.GetStringAsync(url).Result;
+                    dynamic result = JsonConvert.DeserializeObject(json);
+
+                    double lon = result.features[0].geometry.coordinates[0];
+                    double lat = result.features[0].geometry.coordinates[1];
+
+                    return (lat, lon);
+                }
+            }
+            catch
+            {
+                throw new Exception($"Impossible de géocoder l'adresse : {address}");
+            }
+        }
+
+        // Calcul de distance entre deux points GPS
+        private double CalculateDistance(double lat1, double lon1, double lat2, double lon2)
+        {
+            var coord1 = new GeoCoordinate(lat1, lon1);
+            var coord2 = new GeoCoordinate(lat2, lon2);
+            return coord1.GetDistanceTo(coord2); // en mètres
+        }
+
+        // Trouver la station la plus proche avec des vélos disponibles
+        private Station FindNearestStationWithBikes((double Lat, double Lon) origin, List<Station> stations)
+        {
+            return stations
+                .Where(s => s.AvailableBikes > 0)
+                .OrderBy(s => CalculateDistance(origin.Lat, origin.Lon, s.Position.Lat, s.Position.Lng))
+                .FirstOrDefault();
+        }
+
+        // Trouver la station la plus proche avec des places disponibles
+        private Station FindNearestStationWithStands((double Lat, double Lon) dest, List<Station> stations)
+        {
+            return stations
+                .Where(s => s.AvailableBikeStands > 0)
+                .OrderBy(s => CalculateDistance(dest.Lat, dest.Lon, s.Position.Lat, s.Position.Lng))
+                .FirstOrDefault();
+        }
+
+        // Appel direct à OpenRouteService (pas via proxy)
+        private double GetRouteDuration(double startLat, double startLon, double endLat, double endLon, string mode)
+        {
+            try
+            {
+                using (HttpClient client = new HttpClient())
+                {
+                    string url = $"https://api.openrouteservice.org/v2/directions/{mode}?api_key={ORS_API_KEY}&start={startLon},{startLat}&end={endLon},{endLat}";
+                    string json = client.GetStringAsync(url).Result;
+
+                    dynamic result = JsonConvert.DeserializeObject(json);
+                    double duration = result.features[0].properties.segments[0].duration;
+                    Console.WriteLine($"✅ Durée {mode} : {Math.Round(duration / 60, 1)} min");
+                    return duration; // en secondes
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Erreur OpenRouteService : {ex.Message}");
+                return double.PositiveInfinity;
+            }
+        }
+    }
+}
+
+

@@ -1,0 +1,19 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.Serialization;
+using System.ServiceModel;
+using System.Text;
+
+namespace ProxyServer
+{
+
+    // 🚀 Déclare un contrat de service SOAP
+    [ServiceContract]
+    public interface IProxyService
+    {
+        // Méthode principale : exécuter une requête GET vers une API externe
+        [OperationContract]
+        string Get(string url);
+    }
+}

@@ -1,0 +1,87 @@
+﻿using System;
+using System.Runtime.Caching;
+using System.Net.Http;
+using Newtonsoft.Json;
+
+namespace ProxyServer
+{
+    // NOTE: You can use the "Rename" command on the "Refactor" menu to change the class name "Service1" in both code and config file together.
+    public class ProxyService : IProxyService
+    {
+        private static readonly MemoryCache cache = MemoryCache.Default;
+        private const string ORS_API_KEY = "5b3ce3597851110001cf6248c87afe9e1e7f4e0bbfb873fc06a9b3c3"; // ⚠️ À remplacer par votre clé
+
+        public string Get(string url)
+        {
+            try
+            {
+                // 🔹 Étape 1 : vérifier si la donnée est déjà dans le cache
+                if (cache.Contains(url))
+                {
+                    Console.WriteLine($"✅ CACHE HIT → {url}");
+                    return (string)cache[url];
+                }
+
+                Console.WriteLine($"🌍 CACHE MISS → requête vers API : {url}");
+
+                // 🔹 Étape 2 : appeler l'API externe
+                using (HttpClient client = new HttpClient())
+                {
+                    var response = client.GetStringAsync(url).Result;
+
+                    // 🔹 Étape 3 : mettre en cache pour 2 minutes
+                    cache.Add(url, response, DateTimeOffset.Now.AddMinutes(2));
+
+                    return response;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Erreur dans ProxyService : {ex.Message}");
+                return $"{{\"error\":\"{ex.Message}\"}}";
+            }
+        }
+
+        public double GetRouteDuration(double startLat, double startLon, double endLat, double endLon, string mode)
+        {
+            try
+            {
+                // Construire la clé de cache
+                string cacheKey = $"route_{mode}_{startLat}_{startLon}_{endLat}_{endLon}";
+
+                // Vérifier le cache
+                if (cache.Contains(cacheKey))
+                {
+                    Console.WriteLine($"✅ CACHE HIT → Route {mode}: ({startLat},{startLon}) → ({endLat},{endLon})");
+                    return (double)cache[cacheKey];
+                }
+
+                Console.WriteLine($"🌍 CACHE MISS → Appel OpenRouteService pour {mode}");
+
+                // Construire l'URL OpenRouteService
+                string url = $"https://api.openrouteservice.org/v2/directions/{mode}?api_key={ORS_API_KEY}&start={startLon},{startLat}&end={endLon},{endLat}";
+
+                // Appeler l'API
+                using (HttpClient client = new HttpClient())
+                {
+                    var response = client.GetStringAsync(url).Result;
+
+                    // Parser la réponse JSON
+                    dynamic result = JsonConvert.DeserializeObject(response);
+                    double duration = result.features[0].properties.segments[0].duration;
+
+                    // Mettre en cache pour 5 minutes (les routes changent peu)
+                    cache.Add(cacheKey, duration, DateTimeOffset.Now.AddMinutes(5));
+
+                    Console.WriteLine($"✅ Durée calculée : {duration}s");
+                    return duration;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Erreur OpenRouteService : {ex.Message}");
+                return double.PositiveInfinity; // Route impossible
+            }
+        }
+    }
+}

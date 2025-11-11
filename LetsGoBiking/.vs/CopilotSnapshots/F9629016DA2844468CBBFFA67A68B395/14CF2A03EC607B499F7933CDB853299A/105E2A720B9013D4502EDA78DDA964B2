@@ -1,0 +1,61 @@
+﻿using LetsGoBiking.ServiceReference1;  // Référence vers ton Proxy SOAP
+using Newtonsoft.Json;
+using System;
+using System.IO;
+using System.Net.Http;
+using System.ServiceModel.Web;
+using System.Text;
+using System.Xml;
+
+namespace RoutingService
+{
+    public class RoutingService : IRoutingService
+    {
+        public Stream GetItinerary(string o, string d)
+        {
+            try
+            {
+                Console.WriteLine($"🚀 Requête reçue : {o} → {d}");
+
+                // 1️⃣ Appeler le proxy pour obtenir les stations JCDecaux
+                ProxyServiceClient proxy = new ProxyServiceClient("BasicHttpBinding_IProxyService");
+                string stations = proxy.Get("https://api.jcdecaux.com/vls/v1/stations?contract=Nice&apiKey=4ffffd09ca3de7e586d3f46bebbd9a8a7f98191f");
+
+                // 2️⃣ Géocodage des adresses avec OpenStreetMap
+                string originCoords = GetCoords(o);
+                string destCoords = GetCoords(d);
+
+                // 3️⃣ Réponse de test pour vérifier que tout marche
+                var result = new
+                {
+                    Message = "Routing service fonctionne ✅",
+                    Origin = o,
+                    OriginCoords = originCoords,
+                    Destination = d,
+                    DestinationCoords = destCoords,
+                    NbStations = stations.Length
+                };
+
+                WebOperationContext.Current.OutgoingResponse.ContentType = "application/json";
+                string json = JsonConvert.SerializeObject(result, Formatting.Indented);
+                return new MemoryStream(Encoding.UTF8.GetBytes(json));
+            }
+            catch (Exception ex)
+            {
+                string err = $"{{\"error\":\"{ex.Message}\"}}";
+                return new MemoryStream(Encoding.UTF8.GetBytes(err));
+            }
+        }
+
+        // 🌍 Appel direct à OpenStreetMap pour géocoder
+        private string GetCoords(string address)
+        {
+            using (HttpClient client = new HttpClient())
+            {
+                string url = $"https://nominatim.openstreetmap.org/search?q={Uri.EscapeDataString(address)}&format=json&limit=1";
+                string json = client.GetStringAsync(url).Result;
+                return json;
+            }
+        }
+    }
+}
